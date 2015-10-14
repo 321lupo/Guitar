@@ -1,8 +1,9 @@
 #include <MIDI.h>
 #include <Wire.h>
-#define MIDI_CHAN 4
-
-#define FSRSHORT_N 6
+#define MIDI_CHAN 4                                       //check if choseposnote function works, otherwise place back as before
+                                                          //ADD LEDS
+                                                          //TRY OUT MIDDLE MODE...
+#define FSRSHORT_N 6                                     //pressure sensors 
 int fsrshortPins[] = {A6, A9, A2, A0, A1, A3};
 int fsrshortReadings[FSRSHORT_N];   
 #define FSRSHORTTHRESH 800
@@ -13,7 +14,11 @@ int fsrlongReadings[FSRLONG_N];
 bool fsrlongPress[FSRLONG_N];
 #define POS_N 2
 int posPins[] = {A11, A10};  
-int posReadings[POS_N];             
+int posReadings[POS_N];      
+int poslongPitch [POS_N];      
+int posChange [POS_N]; 
+int posnotePos [POS_N];
+
 
 #define BUTTON1 11                                        //buttons (dont need bounce)
 #define BUTTON2 12 
@@ -21,7 +26,7 @@ int buttonLeft = 0;
 int buttonRight = 0;
 
 int16_t accel_x, accel_y, accel_z;                        //accelerometer
-#define accel_module (0x53)                               // for now only x
+#define accel_module (0x53)                               // for now using only x
 byte values [6];
 char output [512];
 
@@ -79,10 +84,7 @@ void loop(void) {
     resetScales();
     }
   }
-
-
-  
-  else if (buttonLeft == HIGH && buttonRight == HIGH) {              //BANK 1
+  else if (buttonLeft == HIGH && buttonRight == HIGH) {              //BANK 1 send pos notes plus pitchbend
     Serial.println ("MIDDLE");
     bankold = bank;                                                  //MIDI RESET to make sure all notes from the other banks are stopped
     bank = 1;
@@ -90,10 +92,48 @@ void loop(void) {
       resetScales();
       Serial.println ("MIDI RESET");
     }
+//NEW
+    for(int i=0; i<FSRLONG_N; i++) {
+      Serial.print (posReadings[i]);
+      Serial.print (" ");
+      Serial.print (posnote[i]);
+      Serial.print (" ");
+      
+      if (fsrlongReadings[i]<=FSRLONGTHRESH) { 
+        if (fsrlongPress[i]==false){   
+          delay (35);                                 //THIS IN MILLIS
+          posReadings[i] = analogRead(posPins[i]); 
+          posnotePos[i] = posReadings[i];
+          choseposNote();                             //maps posreading to a note of the respective scale, chosen according to the guitar frets (see below)
+          posnotevel[i] = map (fsrlongReadings[i], FSRLONGTHRESH, 0, 0, 127); 
+          if (i==0){
+            usbMIDI.sendNoteOn(scale0[posnote[i]], posnotevel[i], MIDI_CHAN); 
+          }
+          else if (i==1){
+            usbMIDI.sendNoteOn(scale1[posnote[i]], posnotevel[i], MIDI_CHAN); 
+          }  
+        }
+        posReadings[i] = analogRead(posPins[i]); 
+        fsrlongPress[i]=true;
+        posChange[i] = (posReadings[i] - posnotePos[i]) * 16; 
+        poslongPitch[i] = 8192 + posChange[i];
+        poslongPitch[i] = constrain(poslongPitch[i],0,16383);
+        usbMIDI.sendPitchBend(poslongPitch[i], MIDI_CHAN);
+
+      } 
+      else if (fsrlongReadings[i]>FSRLONGTHRESH && fsrlongPress[i] == true) {
+        fsrlongPress[i] = false;
+        delay(30);
+        for(int x=0; x<POSSCALE_N;x++){
+          if (i==0) usbMIDI.sendNoteOff(scale0[x], 127, MIDI_CHAN); 
+          else if (i==1) usbMIDI.sendNoteOff(scale1[x], 127, MIDI_CHAN);   
+        }  
+      }
+    }
+
+//NEW
+    
   }
-
-
-
   
   else if (buttonRight == LOW) {                                     //BANK 2
     Serial.println ("RIGHT");
@@ -103,11 +143,6 @@ void loop(void) {
       resetScales();
       Serial.println ("MIDI RESET");
     }
-
-
-
-
-    
     for(int i=0; i<FSRLONG_N; i++) {
       Serial.print (posReadings[i]);
       Serial.print (" ");
@@ -117,21 +152,7 @@ void loop(void) {
         if (fsrlongPress[i]==false){   
           delay (35);                                 //THIS IN MILLIS
           posReadings[i] = analogRead(posPins[i]); 
-  
-          if (posReadings[i]<=1023 && posReadings[i]>980) posnote[i]=0;
-          if (posReadings[i]<=980 && posReadings[i]>855) posnote[i]=1;
-          if (posReadings[i]<=855 && posReadings[i]>750) posnote[i]=2;
-          if (posReadings[i]<=750 && posReadings[i]>640) posnote[i]=3;
-          if (posReadings[i]<=640 && posReadings[i]>540) posnote[i]=4;
-          if (posReadings[i]<=540 && posReadings[i]>445) posnote[i]=5;
-          if (posReadings[i]<=445 && posReadings[i]>350) posnote[i]=6;
-          if (posReadings[i]<=350 && posReadings[i]>275) posnote[i]=7;
-          if (posReadings[i]<=275 && posReadings[i]>190) posnote[i]=8;
-          if (posReadings[i]<=190 && posReadings[i]>110) posnote[i]=9;
-          if (posReadings[i]<=110 && posReadings[i]>60) posnote[i]=10;
-          if (posReadings[i]<=60 && posReadings[i]>20) posnote[i]=11;
-          if (posReadings[i]<=20 && posReadings[i]>=0) posnote[i]=12;
-    
+          choseposNote();                                                               //maps posreading to a note of the respective scale, chosen according to the guitar frets (see below)
           posnotevel[i] = map (fsrlongReadings[i], FSRLONGTHRESH, 0, 0, 127); 
           if (i==0){
             usbMIDI.sendNoteOn(scale0[posnote[i]], posnotevel[i], MIDI_CHAN); 
@@ -143,20 +164,7 @@ void loop(void) {
         }
         posReadings[i] = analogRead(posPins[i]);
         delay(20);                                          //THIS IN MILLIS 
-        if (posReadings[i]<=1023 && posReadings[i]>980) posnote[i]=0;
-        if (posReadings[i]<=980 && posReadings[i]>855) posnote[i]=1;
-        if (posReadings[i]<=855 && posReadings[i]>750) posnote[i]=2;
-        if (posReadings[i]<=750 && posReadings[i]>640) posnote[i]=3;
-        if (posReadings[i]<=640 && posReadings[i]>540) posnote[i]=4;
-        if (posReadings[i]<=540 && posReadings[i]>445) posnote[i]=5;
-        if (posReadings[i]<=445 && posReadings[i]>350) posnote[i]=6;
-        if (posReadings[i]<=350 && posReadings[i]>275) posnote[i]=7;
-        if (posReadings[i]<=275 && posReadings[i]>190) posnote[i]=8;
-        if (posReadings[i]<=190 && posReadings[i]>110) posnote[i]=9;
-        if (posReadings[i]<=110 && posReadings[i]>60) posnote[i]=10;
-        if (posReadings[i]<=60 && posReadings[i]>20) posnote[i]=11;
-        if (posReadings[i]<=20 && posReadings[i]>=0) posnote[i]=12;
-        
+        choseposNote();                                                                  //maps posreading to a note of the respective scale, chosen according to the guitar frets (see below)
         if (posnoteold[i] != posnote[i]) {                                              //NEEDS A BOUNCE
           if (i==0) usbMIDI.sendNoteOff(scale0[posnoteold[i]], 127, MIDI_CHAN); 
           else if (i==1) usbMIDI.sendNoteOff(scale1[posnoteold[i]], 127, MIDI_CHAN); 
@@ -167,7 +175,7 @@ void loop(void) {
         }
         posnoteold[i]=posnote[i];
         fsrlongPress[i]=true;
-      }
+      } 
       else if (fsrlongReadings[i]>FSRLONGTHRESH && fsrlongPress[i] == true) {
         fsrlongPress[i] = false;
         delay(30);
@@ -178,6 +186,7 @@ void loop(void) {
       }
     }
   }
+
   
   for(int i=0; i<FSRSHORT_N; i++){
     if (fsrshortReadings[i]<=FSRSHORTTHRESH && bank==2){
@@ -258,6 +267,23 @@ void readPos(){
     Serial.print (posReadings[i]);
     Serial.print (" ");
   }  
+}
+
+void choseposNote(){                                              //determine the values of posreading according to the guitar fret pos reading, all in halftone steps
+  int i;
+  if (posReadings[i]<=1023 && posReadings[i]>980) posnote[i]=0;
+  if (posReadings[i]<=980 && posReadings[i]>855) posnote[i]=1;
+  if (posReadings[i]<=855 && posReadings[i]>750) posnote[i]=2;
+  if (posReadings[i]<=750 && posReadings[i]>640) posnote[i]=3;
+  if (posReadings[i]<=640 && posReadings[i]>540) posnote[i]=4;
+  if (posReadings[i]<=540 && posReadings[i]>445) posnote[i]=5;
+  if (posReadings[i]<=445 && posReadings[i]>350) posnote[i]=6;
+  if (posReadings[i]<=350 && posReadings[i]>275) posnote[i]=7;
+  if (posReadings[i]<=275 && posReadings[i]>190) posnote[i]=8;
+  if (posReadings[i]<=190 && posReadings[i]>110) posnote[i]=9;
+  if (posReadings[i]<=110 && posReadings[i]>60) posnote[i]=10;
+  if (posReadings[i]<=60 && posReadings[i]>20) posnote[i]=11;
+  if (posReadings[i]<=20 && posReadings[i]>=0) posnote[i]=12;
 }
 
 
