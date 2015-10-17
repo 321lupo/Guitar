@@ -78,7 +78,7 @@ void loop(void) {
   millisTime = millis();                                   //time var running
 
   for(int i=0; i<FSRSHORT_N; i++){                         //send ctrl values all the time whe fsr press, independent from bank
-    if (fsrshortReadings[i]<=FSRSHORTTHRESH && bank==2){
+    if (fsrshortReadings[i]<=FSRSHORTTHRESH){
       if (accel_x<-150) accel_x=-150;
       if (accel_x>250) accel_x=250;
       int xctrllevel = map (accel_x, -150, 250, 0, 127);  
