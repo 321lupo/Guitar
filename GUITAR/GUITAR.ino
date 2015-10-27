@@ -85,6 +85,7 @@ void loop(void) {
 
   millisTime = millis();                                   //time var running
 
+<<<<<<< HEAD
   for(int i=0; i<FSRSHORT_N; i++){                         //send ctrl values when fsr pressed, do not send when pressed again independent from bank
     if (fsrshortReadings[i]<=FSRSHORTTHRESH && fsrshortSend[i]==false && (millisTime-fsrshortoffTime[i]>=FSRSHORTBOUNCE)) {
       fsrshortSend[i]=true;
@@ -95,6 +96,10 @@ void loop(void) {
       fsrshortoffTime[i]=millisTime;    
     }
     if (fsrshortSend[i]==true){
+=======
+  for(int i=0; i<FSRSHORT_N; i++){                         //send ctrl values all the time whe fsr press, independent from bank
+    if (fsrshortReadings[i]<=FSRSHORTTHRESH && bank==2){
+>>>>>>> parent of f854a7f... two modes, one ctrl, one note send, the last is off
       if (accel_x<-150) accel_x=-150;
       if (accel_x>250) accel_x=250;
       int xctrllevel = map (accel_x, -150, 250, 0, 127);  
