@@ -24,8 +24,26 @@ int posReadings[POS_N];
 int poslongPitch [POS_N];      
 int posChange [POS_N]; 
 int posnotePos [POS_N];
-int poschangeTime[POS_N]={0,0};
 
+int bank = 0;
+int bankold = 0;
+#define CTRL_START 61
+#define POSSCALE_N 13
+int posnote[POS_N];
+int posnoteold[POS_N];
+int16_t scale0[] = {40,41,42,43,44,45,46,47,48,49,50,51,52};
+int16_t scale1[] = {45,46,47,48,49,50,51,52,53,54,55,56,57};
+int posnotevel[POS_N];                                    //note velocities
+#define POS_DELAY 20                                      //INTEGRATED DELAYS
+#define CHANGENOTE_TIME 50
+#define MIDIONDELAY_TIME 50
+#define MIDIOFFDELAY_TIME 50
+unsigned long  poschangeTime[POS_N]={0,0};
+unsigned long  poschangemidionTime[POS_N]={0,0};
+unsigned long  poschangemidioffTime[POS_N]={0,0};
+
+unsigned long startTime[FSRLONG_N];                       //millis bounce variables
+unsigned long millisTime;
 
 #define BUTTON1 11                                        //buttons (dont need bounce: switch button, three possible states)
 #define BUTTON2 12 
@@ -37,23 +55,6 @@ int16_t accel_x, accel_y, accel_z;                        //accelerometer
 byte values [6];
 char output [512];
 
-int bank = 0;
-int bankold = 0;
-#define CTRL_START 61
-#define POSSCALE_N 13
-int posnote[POS_N];
-int posnoteold[POS_N];
-int posnotenew[POS_N];
-bool posnotechangeBool[POS_N]={false, false};
-int16_t scale0[] = {40,41,42,43,44,45,46,47,48,49,50,51,52};
-int16_t scale1[] = {45,46,47,48,49,50,51,52,53,54,55,56,57};
-int posnotevel[POS_N];                                    //note velocities
-#define POS_DELAY 25                                      //INTEGRATED DELAYS
-#define CHANGENOTE_TIME 15
-
-unsigned long startTime[FSRLONG_N];                       //millis bounce variables
-unsigned long millisTime;
-
 void setup(void) {
   
   Serial.begin(9600);                                     
@@ -62,7 +63,6 @@ void setup(void) {
   initButtons();
   for(int i=0; i<FSRLONG_N; i++){                          
     fsrlongPress[i]=false;                                 //reset all press bools
-    posnotechangeBool[i]=false;
     startTime[i]=0;
   }
   for(int i=0; i<FSRSHORT_N; i++) {
@@ -176,29 +176,22 @@ void loop(void) {
       Serial.print (posnote[i]);
       Serial.print (" ");
       if (fsrlongReadings[i]<=FSRLONGTHRESH) { 
-        if (fsrlongPress[i]==false){                                                  //if fsr was not already been pressed
-          delay (POS_DELAY);                                                          //let pos sensor stabilize
+        if (fsrlongPress[i]==false && (millisTime-poschangemidionTime[i]>=CHANGENOTE_TIME) ){                                                  //if fsr was not already been pressed
+          poschangemidionTime[i]=millisTime;                                                       //let pos sensor stabilize
           posReadings[i] = analogRead(posPins[i]);                                    //read pos sensor
           choseposNote();                                                             //maps posreading to a note of the respective scale, chosen according to the guitar frets (see below)
           posnotevel[i] = map (fsrlongReadings[i], FSRLONGTHRESH, 0, 70, 127); 
           if (i==0) usbMIDI.sendNoteOn(scale0[posnote[i]], posnotevel[i], MIDI_CHAN); 
           else if (i==1) usbMIDI.sendNoteOn(scale1[posnote[i]], posnotevel[i], MIDI_CHAN); 
-          posnoteold[i]=posnote[i];                                                     //save the note as old note for later comparison
+          posnoteold[i]=posnote[i];                                                   //save the note as old note for later comparison
         }
         fsrlongPress[i]=true;                                                         //fsr is now being pressed
         posReadings[i] = analogRead(posPins[i]);                                      //keep reading pos sensor for sensor changes
         choseposNote();                                                               //maps posreading to a note of the respective scale, chosen according to the guitar frets (see below)
-        if (posnoteold[i]!=posnote[i]) {                                              //if a change has been read
-          poschangeTime[i]=millisTime;                                                //start bouncer
-          posnotechangeBool[i]=true;                                                  //set bool to changeon
-          posnotenew[i]=posnote[i];                                                   //save the new note for later comparison
-        }
-        posReadings[i] = analogRead(posPins[i]);                                      //keep reading pos sensor for sensor changes
-        choseposNote();    
-        if (fsrlongReadings[i]<=FSRLONGTHRESHHIGH && (millisTime-poschangeTime[i]>=CHANGENOTE_TIME) && posnotenew[i] == posnote[i] &&  posnotechangeBool[i] == true) {     //if fsr is still pressed and the note has change, stop old midi note and send new one  
-          posnotechangeBool[i]=false;
+
+        if (fsrlongReadings[i]<=FSRLONGTHRESH && posnoteold[i]!=posnote[i] && (millisTime-poschangeTime[i]>=CHANGENOTE_TIME)) {     //if fsr is still pressed and the note has change, stop old midi note and send new one  
           posnoteold[i]=posnote[i]; 
-          posnotenew[i]= {-1};                          //MAKE SURE THIS DOESNT FUCK UP                           
+          poschangeTime[i]=millisTime;
                                                               //if (i==0) usbMIDI.sendNoteOff(scale0[posnoteold[i]], 127, MIDI_CHAN); 
                                                               //else if (i==1) usbMIDI.sendNoteOff(scale1[posnoteold[i]], 127, MIDI_CHAN);   
           for(int x=0; x<POSSCALE_N;x++){                                             //send note off
@@ -206,7 +199,7 @@ void loop(void) {
             else if (i==1) usbMIDI.sendNoteOff(scale1[x], 127, MIDI_CHAN);   
           }  
           if (i==0) usbMIDI.sendNoteOn(scale0[posnote[i]], posnotevel[i], MIDI_CHAN); 
-          else if (i==1) usbMIDI.sendNoteOn(scale1[posnote[i]], posnotevel[i], MIDI_CHAN);
+          else if (i==1) usbMIDI.sendNoteOn(scale1[posnote[i]], posnotevel[i], MIDI_CHAN);       
         }
       } 
       else if (fsrlongReadings[i]>FSRLONGTHRESH && fsrlongPress[i] == true) {       //if reading go above threshold and fsr has been pressed
@@ -214,6 +207,7 @@ void loop(void) {
         for(int x=0; x<POSSCALE_N;x++){                                             //send note off
           if (i==0) usbMIDI.sendNoteOff(scale0[x], 127, MIDI_CHAN); 
           else if (i==1) usbMIDI.sendNoteOff(scale1[x], 127, MIDI_CHAN);   
+          delay(POS_DELAY);
         }  
       }
     }
