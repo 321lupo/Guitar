@@ -1,7 +1,16 @@
 #include <MIDI.h>                   
 #include <Wire.h>
-#define MIDI_CHAN 4                                      
-                                                         //ADD LEDS
+#define MIDI_CHAN 4                                           //maybe put in a timer after the notes, so that a note cannot be send sooner then something after another note?
+                                   
+#define GREEN1 5                      //LEDS
+#define BLUE1 3
+#define RED1 4
+#define GREEN2 6
+#define BLUE2 10
+#define RED2 9   
+
+int LED[]={BLUE1, GREEN1, RED1, BLUE2, GREEN2, RED2};   
+int ledalways=20;              
                                                          
 #define FSRSHORT_N 6                                     //pressure sensors 
 int fsrshortPins[] = {A6, A9, A2, A0, A1, A3};
@@ -24,7 +33,7 @@ int posReadings[POS_N];
 int poslongPitch [POS_N];      
 int posChange [POS_N]; 
 int posnotePos [POS_N];
-int poschangeTime[POS_N]={0,0};
+
 
 
 #define BUTTON1 11                                        //buttons (dont need bounce: switch button, three possible states)
@@ -39,7 +48,7 @@ char output [512];
 
 int bank = 0;
 int bankold = 0;
-#define CTRL_START 61
+#define CTRL_START 55
 #define POSSCALE_N 13
 int posnote[POS_N];
 int posnoteold[POS_N];
@@ -48,11 +57,11 @@ bool posnotechangeBool[POS_N]={false, false};
 int16_t scale0[] = {40,41,42,43,44,45,46,47,48,49,50,51,52};
 int16_t scale1[] = {45,46,47,48,49,50,51,52,53,54,55,56,57};
 int posnotevel[POS_N];                                    //note velocities
-#define POS_DELAY 25                                      //INTEGRATED DELAYS
-#define CHANGENOTE_TIME 15
-
-unsigned long startTime[FSRLONG_N];                       //millis bounce variables
-unsigned long millisTime;
+#define POS_DELAY 12                                      //INTEGRATED DELAYS
+                                                              
+unsigned long millisTime;                                 //millis bounce variables
+unsigned long poschangeTime[POS_N]={0,0};
+#define CHANGENOTE_TIME 60
 
 void setup(void) {
   
@@ -60,15 +69,19 @@ void setup(void) {
   initFsrs();                                              //all init functions below
   initAccel();
   initButtons();
+  initLeds();  
+
+  analogWrite(BLUE1, ledalways);
+  analogWrite(BLUE2, ledalways);
+  
   for(int i=0; i<FSRLONG_N; i++){                          
     fsrlongPress[i]=false;                                 //reset all press bools
     posnotechangeBool[i]=false;
-    startTime[i]=0;
+    poschangeTime[i]=0;
   }
   for(int i=0; i<FSRSHORT_N; i++) {
     fsrshortSend[i]=false;
   }
-  
 }
 
 void loop(void) {
@@ -78,7 +91,7 @@ void loop(void) {
   readAccel();
   readfsrShorts();
   readfsrLongs(); 
-  //readPos();                                             //not good to read pos pins all the time better only read at certain point after fsr event when pos pin stablizied after press
+  //readPos();
   readButtons();
 
   Serial.println ("");
@@ -92,13 +105,20 @@ void loop(void) {
     }
     else if (fsrshortReadings[i]<=FSRSHORTTHRESH && fsrshortSend[i]==true && (millisTime-fsrshortonTime[i]>=FSRSHORTBOUNCE)) {
       fsrshortSend[i]=false;
-      fsrshortoffTime[i]=millisTime;    
+      fsrshortoffTime[i]=millisTime; 
+      analogWrite(LED[i], 0);  
+      if (fsrshortSend[0]==false && fsrshortSend[1]==false && fsrshortSend[2]==false && fsrshortSend[3]==false && fsrshortSend[4]==false && fsrshortSend[5]==false) {
+        analogWrite(BLUE1, ledalways);
+        analogWrite(BLUE2, ledalways);                                       //if all fsrshorts are off, switch back to light blue
+      }
     }
     if (fsrshortSend[i]==true){
       if (accel_x<-150) accel_x=-150;
       if (accel_x>250) accel_x=250;
       int xctrllevel = map (accel_x, -150, 250, 0, 127);  
       usbMIDI.sendControlChange(CTRL_START+i, xctrllevel, MIDI_CHAN); 
+      int ledval = map (accel_x, -150, 30, 0, 255);  
+      analogWrite(LED[i], ledval);                                               //turn Led on respective to fsrshort
       Serial.print("SEND CTRL ");
       Serial.println(i);
     } 
@@ -110,7 +130,8 @@ void loop(void) {
     bank = 0;
     if (bank!=bankold) {
     resetScales();                                         //when bank switch occurs reset scales (send midi offs for all notes of the scales)
-    usbMIDI.sendPitchBend(8192, MIDI_CHAN);                //also reset pitchbend back to standard, 
+    usbMIDI.sendPitchBend(8192, MIDI_CHAN);                //also reset pitchbend back to standard
+    
     }
   }
   else if (buttonLeft == HIGH && buttonRight == HIGH) {    //BANK 1 BUTTON MIDDLE - send pos notes plus pitchbend
@@ -120,7 +141,6 @@ void loop(void) {
     if (bank!=bankold) {
       resetScales();
       usbMIDI.sendPitchBend(8192, MIDI_CHAN);
-      Serial.println ("MIDI RESET");
     }
     for(int i=0; i<FSRLONG_N; i++) {                       //FSR send notes on pos sensors plus subsequent pitchbend
       Serial.print (posReadings[i]);
@@ -137,6 +157,8 @@ void loop(void) {
           posnotevel[i] = map (fsrlongReadings[i], FSRLONGTHRESH, 0, 70, 127); 
           if (i==0) usbMIDI.sendNoteOn(scale0[posnote[i]], posnotevel[i], MIDI_CHAN); 
           else if (i==1) usbMIDI.sendNoteOn(scale1[posnote[i]], posnotevel[i], MIDI_CHAN);
+          analogWrite(BLUE1, 255); 
+          analogWrite(BLUE2, 255); 
         }
         posReadings[i] = analogRead(posPins[i]); 
         fsrlongPress[i]=true;
@@ -151,14 +173,13 @@ void loop(void) {
         delay(POS_DELAY);
         for(int x=0; x<POSSCALE_N;x++){
           if (i==0) usbMIDI.sendNoteOff(scale0[x], 127, MIDI_CHAN); 
-          else if (i==1) usbMIDI.sendNoteOff(scale1[x], 127, MIDI_CHAN);   
+          else if (i==1) usbMIDI.sendNoteOff(scale1[x], 127, MIDI_CHAN);  
+          analogWrite(BLUE1, ledalways); 
+          analogWrite(BLUE2, ledalways);  
           delay (POS_DELAY);   
         }  
       }
     }
-
-//NEW
-    
   }
   
   else if (buttonRight == LOW) {                           //BANK 2
@@ -170,7 +191,7 @@ void loop(void) {
       usbMIDI.sendPitchBend(8192, MIDI_CHAN);
       Serial.println ("MIDI RESET");
     }
-    for(int i=0; i<FSRLONG_N; i++) {
+      for(int i=0; i<FSRLONG_N; i++) {
       Serial.print (posReadings[i]);
       Serial.print (" ");
       Serial.print (posnote[i]);
@@ -183,47 +204,39 @@ void loop(void) {
           posnotevel[i] = map (fsrlongReadings[i], FSRLONGTHRESH, 0, 70, 127); 
           if (i==0) usbMIDI.sendNoteOn(scale0[posnote[i]], posnotevel[i], MIDI_CHAN); 
           else if (i==1) usbMIDI.sendNoteOn(scale1[posnote[i]], posnotevel[i], MIDI_CHAN); 
+          analogWrite(BLUE1, 255); 
+          analogWrite(BLUE2, 255); 
+          //DELAY HERE?
           posnoteold[i]=posnote[i];                                                     //save the note as old note for later comparison
         }
         fsrlongPress[i]=true;                                                         //fsr is now being pressed
         posReadings[i] = analogRead(posPins[i]);                                      //keep reading pos sensor for sensor changes
         choseposNote();                                                               //maps posreading to a note of the respective scale, chosen according to the guitar frets (see below)
-        if (posnoteold[i]!=posnote[i]) {                                              //if a change has been read
-          poschangeTime[i]=millisTime;                                                //start bouncer
-          posnotechangeBool[i]=true;                                                  //set bool to changeon
-          posnotenew[i]=posnote[i];                                                   //save the new note for later comparison
-        }
-        posReadings[i] = analogRead(posPins[i]);                                      //keep reading pos sensor for sensor changes
-        choseposNote();    
-        if (fsrlongReadings[i]<=FSRLONGTHRESHHIGH && (millisTime-poschangeTime[i]>=CHANGENOTE_TIME) && posnotenew[i] == posnote[i] &&  posnotechangeBool[i] == true) {     //if fsr is still pressed and the note has change, stop old midi note and send new one  
-          posnotechangeBool[i]=false;
-          posnoteold[i]=posnote[i]; 
-          posnotenew[i]= {-1};                          //MAKE SURE THIS DOESNT FUCK UP                           
-                                                              //if (i==0) usbMIDI.sendNoteOff(scale0[posnoteold[i]], 127, MIDI_CHAN); 
-                                                              //else if (i==1) usbMIDI.sendNoteOff(scale1[posnoteold[i]], 127, MIDI_CHAN);   
+        
+        if (posnoteold[i]!=posnote[i] && (millisTime-poschangeTime[i]>=CHANGENOTE_TIME)) {                                              //if a change has been read
+          poschangeTime[i]=millisTime;                                              //start bouncer
           for(int x=0; x<POSSCALE_N;x++){                                             //send note off
             if (i==0) usbMIDI.sendNoteOff(scale0[x], 127, MIDI_CHAN); 
             else if (i==1) usbMIDI.sendNoteOff(scale1[x], 127, MIDI_CHAN);   
           }  
           if (i==0) usbMIDI.sendNoteOn(scale0[posnote[i]], posnotevel[i], MIDI_CHAN); 
           else if (i==1) usbMIDI.sendNoteOn(scale1[posnote[i]], posnotevel[i], MIDI_CHAN);
-        }
-      } 
+          posnoteold[i]=posnote[i]; 
+        } 
+      }
+      
       else if (fsrlongReadings[i]>FSRLONGTHRESH && fsrlongPress[i] == true) {       //if reading go above threshold and fsr has been pressed
         fsrlongPress[i] = false;                                                    //fsr not pressed anymore                              
         for(int x=0; x<POSSCALE_N;x++){                                             //send note off
           if (i==0) usbMIDI.sendNoteOff(scale0[x], 127, MIDI_CHAN); 
-          else if (i==1) usbMIDI.sendNoteOff(scale1[x], 127, MIDI_CHAN);   
+          else if (i==1) usbMIDI.sendNoteOff(scale1[x], 127, MIDI_CHAN);    
         }  
+        analogWrite(BLUE1, ledalways); 
+        analogWrite(BLUE2, ledalways);  
       }
     }
   }
 }
-
-
-
-
-
 
 void initFsrs(){
   pinMode(A0, INPUT_PULLUP); 
@@ -254,6 +267,24 @@ void initAccel(){
 void initButtons(){
   pinMode(BUTTON1, INPUT_PULLUP);
   pinMode(BUTTON2, INPUT_PULLUP);
+}
+
+void initLeds() {
+  pinMode(BLUE1, OUTPUT);
+  pinMode(GREEN1, OUTPUT);
+  pinMode(RED1, OUTPUT);
+  pinMode(BLUE2, OUTPUT);
+  pinMode(GREEN2, OUTPUT);
+  pinMode(RED2, OUTPUT);
+}
+
+void clearLeds() {
+  analogWrite(BLUE1, 0); 
+  analogWrite(BLUE2, 0);
+  analogWrite(RED1, 0);
+  analogWrite(RED2, 0);
+  analogWrite(GREEN1, 0);
+  analogWrite(GREEN2, 0);
 }
 
 void readfsrShorts(){                          //reads and prints fsr values
