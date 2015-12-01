@@ -131,7 +131,8 @@ void loop(void) {
     if (bank!=bankold) {
     resetScales();                                         //when bank switch occurs reset scales (send midi offs for all notes of the scales)
     usbMIDI.sendPitchBend(8192, MIDI_CHAN);                //also reset pitchbend back to standard
-    
+    analogWrite(BLUE1, ledalways); 
+    analogWrite(BLUE2, ledalways);  
     }
   }
   else if (buttonLeft == HIGH && buttonRight == HIGH) {    //BANK 1 BUTTON MIDDLE - send pos notes plus pitchbend
